@@ -10,7 +10,8 @@
       <div class="cursor"></div>
     </div>
     <div id="status"></div>
-    <video id="video" muted autoplay></video>
+    <video class="hide" id="video" muted autoplay></video>
+    <canvas id="cv"></canvas>
     <script>
 "use strict";
 
@@ -19,14 +20,73 @@ navigator.getUserMedia = navigator.getUserMedia ||
   navigator.mozGetUserMedia;
 
 const video = document.querySelector("#video");
+const cv = document.querySelector("#cv");
+const c2 = cv.getContext("2d");
+const picker = [];
+let senthsl=[0,0,0];
+
+cv.addEventListener("click", (e)=>{
+  const rect = e.target.getBoundingClientRect();
+  picker.push([e.clientX - rect.left,e.clientY - rect.top]);
+});
 navigator.getUserMedia({video: true}, (stream) => {
-  video.src = setAttribute("src", stream);
+  video.setAttribute("src", URL.createObjectURL(stream));
 },()=>{});
+video.addEventListener("play", ()=>{
+  cv.width = video.videoWidth;
+  cv.height = video.videoHeight;
+});
+
+move_frame();
+
+function move_frame() {
+  c2.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+
+  const ps = picker.map(([x,y])=>{
+    const p = c2.getImageData(x, y, 1, 1).data;
+    const d = 5;
+    c2.lineWidth = 1;
+    c2.strokeStyle = "#000";
+    c2.fillStyle = `rgb(${p[0]},${p[1]},${p[2]})`;
+    c2.beginPath();
+    c2.arc(x, y, d*2, 0, Math.PI*2, true);
+    c2.fill();
+    c2.stroke();
+    return p;
+  });
+
+  if(ps.length>0){
+    senthsl = rgbToHsl(ps[ps.length - 1]);
+    update_slider();
+  }
+  setTimeout(move_frame, 0);
+}
+
+function rgbToHsl([r, g, b]){
+  r /= 255, g /= 255, b /= 255;
+  var max = Math.max(r, g, b), min = Math.min(r, g, b);
+  var h, s, l = (max + min) / 2;
+
+  if(max == min){
+    h = s = 0; // achromatic
+  }else{
+    var d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch(max){
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+
+  return [h, s, l];
+}
 
 const socket = io();
 
 socket.on('light_status', (data)=>{
-  document.querySelector("#status").textContent = JSON.stringify(data);
+  //document.querySelector("#status").textContent = JSON.stringify(data);
 });
 
 function send_light(data){
@@ -76,15 +136,21 @@ function init_slider(){
 
 init_slider();
 
+var upf = 0;
 function update_slider(){
   const sliders = document.querySelectorAll(".slider");
   sliders.forEach((s)=>{
     const c = s.querySelector(".cursor");
     let l = s.dataset.value = Math.min(365,Math.max(0,+s.dataset.cvalue-22));
-    send_light({"hue": l});
-    console.log("update",s.dataset.cvalue,l);
-    c.style.left = `${5 + 0|s.dataset.value}px`;
+    l = senthsl[0] * 360;
+
+    document.querySelector("#status").textContent = (0|l) + ":" + (0|(senthsl[2]*100));
+    if(upf % 100 == 0){
+      send_light({"hsl": senthsl});
+    }
+    c.style.left = `${5 + l}px`;
   });
+  upf++;
 };
 
   </script>
@@ -109,6 +175,9 @@ body {
 }
 .cursor {
   position: absolute;
+}
+.hide {
+  display: none;
 }
   </style>
   </body>
